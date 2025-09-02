@@ -1,0 +1,442 @@
+import validator from 'validator';
+import userModel from '../models/userModel.js';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import { v2 as cloudinary } from "cloudinary";
+import doctorModel from '../models/doctorModel.js';
+import appointmentModel from '../models/appointmentModel.js';
+import Razorpay from 'razorpay'
+import crypto from "crypto";
+
+// REGISTER USER
+const registerUser = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // Input validation
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid email",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await userModel.findOne({ email });
+
+    if (existingUser) {
+      const message = existingUser.name === name
+        ? "User already registered"
+        : "Email already used. Please use a different email";
+      return res.status(409).json({
+        success: false,
+        message,
+      });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Save new user
+    const newUser = new userModel({ name, email, password: hashedPassword });
+    const savedUser = await newUser.save();
+
+    // Generate token
+    const token = jwt.sign({ id: savedUser._id }, process.env.JWT_SECRET);
+
+    return res.status(201).json({
+      success: true,
+      message: "User registered successfully",
+      token,
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// LOGIN USER
+const loginUser = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const user = await userModel.findOne({ email });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User does not exist",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token,
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// API to get user profile data
+const getProfile = async (req, res) => {
+  try {
+    const userId = req.user.id
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const userData = await userModel.findById(userId).select("-password");
+
+    if (!userData) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "User data fetched successfully",
+      userData,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: `Internal server error : ${error.message}`,
+    })
+  }
+}
+
+
+
+// API: Update Profile
+const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { name, phone, dob, gender } = req.body;
+    let { address } = req.body
+    const imageFile = req.file;
+
+    if (!name || !phone || !dob || !gender) {
+      return res.status(400).json({ success: false, message: "Missing data" });
+    }
+
+    try {
+      if (typeof address === 'string') {
+        address = JSON.parse(address);
+      }
+    } catch (err) {
+      return res.status(400).json({ success: false, message: "Invalid address format" });
+    }
+
+    const updatedFields = {
+      name,
+      phone,
+      dob,
+      gender,
+      address: address || {}
+    };
+
+    await userModel.findByIdAndUpdate(userId, updatedFields);
+
+    // Upload image if present
+    if (imageFile) {
+      const imageUpload = await cloudinary.uploader.upload(imageFile.path, {
+        resource_type: "image"
+      });
+      const imageURL = imageUpload.secure_url;
+
+      await userModel.findByIdAndUpdate(userId, { image: imageURL });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully"
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: `Internal server error: ${error.message}`
+    });
+  }
+};
+
+
+// API for book an appointment
+const bookAppointment = async (req, res) => {
+  try {
+    const { docId, slotDate, slotTime } = req.body;
+    const userId = req.user.id
+
+    // Input validation
+    if (!userId || !docId || !slotDate || !slotTime) {
+      return res.json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    // Fetch doctor and user
+    const docData = await doctorModel.findById(docId).select("-password");
+    if (!docData || !docData.available) {
+      return res.json({
+        success: false,
+        message: "Doctor not available"
+      });
+    }
+
+    const userData = await userModel.findById(userId).select("-password");
+    if (!userData) {
+      return res.json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Check if slot already booked
+    const bookedSlots = docData.slots_booked[slotDate] || [];
+    if (bookedSlots.includes(slotTime)) {
+      return res.json({
+        success: false,
+        message: "Slot already booked",
+      });
+    }
+
+    // Save appointment
+    const appointment = new appointmentModel({
+      userId,
+      docId,
+      slotDate,
+      slotTime,
+      userData,
+      docData,
+      amount: docData.fees,
+      date: Date.now(),
+    });
+
+    await appointment.save();
+
+    // Update doctor's slot booking
+    const updatedSlots = [...bookedSlots, slotTime];
+    await doctorModel.findByIdAndUpdate(docId, {
+      $set: {
+        [`slots_booked.${slotDate}`]: updatedSlots
+      }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Appointment booked",
+      appointment,
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    return res.status(500).json({
+      success: false,
+      message: `Internal server error: ${error.message}`,
+    });
+  }
+};
+
+
+//my-appointment API
+const listAppointment = async (req, res) => {
+  try {
+
+    const userId = req.user.id
+    const appointments = await appointmentModel.find({ userId }).sort({ date: -1 })
+    return res.json({
+      success: true,
+      message: "Appointment fetched successfully",
+      appointments
+    })
+
+  }
+  catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: `Internal server error: ${error.message}`,
+    });
+  }
+}
+
+
+//appointment cancel API
+const cancelAppointment = async (req, res) => {
+  try {
+    const { appointmentId } = req.body
+
+    const appointment = await appointmentModel.findById(appointmentId)
+    if (!appointment) {
+      return res.json({
+        success: false,
+        message: "Appointment not found",
+      });
+    }
+
+    const { docId, slotDate, slotTime, userId } = appointment;
+
+    if (req.user.id != userId) {
+      return res.json({
+        success: false,
+        message: "You are not authorized to cancel this appointment"
+      })
+    }
+
+    await appointmentModel.findByIdAndDelete(appointmentId)
+    await doctorModel.findByIdAndUpdate(
+      { _id: docId },
+      {
+        $pull: {
+          [`slots_booked.${slotDate}`]: slotTime
+        }
+      }
+    )
+
+    return res.json({
+      success: true,
+      message: "Appointment cancelled successfully",
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: `Internal server error: ${error.message}`,
+    });
+  }
+};
+
+
+const razorpayInstance = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET
+})
+
+const paymentRazorpay = async (req, res) => {
+  try {
+
+    const { appointmentId } = req.body
+    const appointmentData = await appointmentModel.findById(appointmentId)
+
+    if (!appointmentData) {
+      return res.json({
+        success: false,
+        message: "Appointment not found"
+      })
+    }
+
+    const options = {
+      amount: appointmentData.amount * 100,
+      currency: "INR",
+      receipt: appointmentId
+    }
+
+    const order = await razorpayInstance.orders.create(options)
+
+    return res.json({
+      success: true,
+      order
+    })
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: `Internal server error: ${error.message}`,
+    });
+  }
+}
+
+// API to verify payment
+const verifyRazorpay = async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, appointmentId } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, message: "Missing payment details" });
+    }
+
+    // Generate expected signature
+    const sign = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSign = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(sign.toString())
+      .digest("hex");
+
+    if (razorpay_signature === expectedSign) {
+      await appointmentModel.findByIdAndUpdate(
+        appointmentId,
+        { payment: true }
+      );
+
+      return res.json({
+        success: true,
+        message: "Payment successful",
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Payment verification failed",
+      });
+    }
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: `Internal server error: ${error.message}`,
+    });
+  }
+};
+
+export { registerUser, loginUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay };
