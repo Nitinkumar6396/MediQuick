@@ -31,4 +31,4 @@ app.use('/api/user',userRouter)
 // start server
 // app.listen(port, () => console.log("Server started at port:", port))
 
-export const handler = serverless(app)
+export default serverless(app)
