@@ -17,7 +17,9 @@ const Login = () => {
     const submitHandler = async (event) => {
         event.preventDefault()
 
+        let toastId;
         try {
+            toastId = toast.loading('Logging in...')
             if (state === 'Admin') {
                 const { data } = await axios.post(backendUrl + '/api/admin/login', { email, password })
 
@@ -25,7 +27,7 @@ const Login = () => {
                     localStorage.setItem('aToken', data.token)
                     setAToken(data.token)
                     toast.success("Admin logged in successfully")
-                    navigate('/admin/dashboard')
+                    navigate('/')
                 } else {
                     toast.error(data.message)
                 }
@@ -44,6 +46,9 @@ const Login = () => {
         } catch (error) {
             console.error("Login Error:", error)
             toast.error("Invalid Credentials")
+        }
+        finally{
+            toast.dismiss(toastId)
         }
     }
 
