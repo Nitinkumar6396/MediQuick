@@ -18,7 +18,7 @@ cloudinaryConnect();
 // middlewares
 app.use(express.json());
 app.use(cors({
-  origin:'https://medi-quick-panel.vercel.app',
+  origin:'https://medi-quick-panel-pied.vercel.app',
   credentials:true
 }));
 
