@@ -101,7 +101,7 @@ const LogIn = () => {
       {
         state === "login" &&
         <div className="flex flex-row gap-1 mt-1 italic">
-          <Link to={''} className="text-blue-600 underline ml-1">
+          <Link to={'https://medi-quick-panel-pied.vercel.app'} className="text-blue-600 underline ml-1">
             Click here
           </Link>
           <p className="font-medium">for doctor/admin login.</p>
