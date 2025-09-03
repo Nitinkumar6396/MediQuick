@@ -18,7 +18,7 @@ cloudinaryConnect();
 // middlewares
 app.use(express.json());
 app.use(cors({
-  origin:'https://mediquick-backend-c8jc.onrender.com',
+  origin:'https://medi-quick-panel.vercel.app',
   credentials:true
 }));
 
