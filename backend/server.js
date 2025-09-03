@@ -17,7 +17,10 @@ cloudinaryConnect();
 
 // middlewares
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin:'https://mediquick-backend-c8jc.onrender.com',
+  credentials:true
+}));
 
 // api endpoint
 app.get('/', (req, res) => {
