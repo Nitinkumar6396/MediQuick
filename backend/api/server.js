@@ -48,4 +48,4 @@ app.use('/api/user', async (req, res, next) => {
 }, userRouter)
 
 // --- export for vercel ---
-export const handler = serverless(app)
+export default serverless(app)
