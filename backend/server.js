@@ -20,7 +20,8 @@ app.use(express.json());
 app.use(cors({
   origin:[
     'https://medi-quick-panel-pied.vercel.app',
-    'https://medi-quick-topaz.vercel.app'
+    'https://medi-quick-topaz.vercel.app',
+    'http://localhost:5173'
   ],
   credentials:true
 }));

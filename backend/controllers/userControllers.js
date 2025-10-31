@@ -7,52 +7,82 @@ import doctorModel from '../models/doctorModel.js';
 import appointmentModel from '../models/appointmentModel.js';
 import Razorpay from 'razorpay'
 import crypto from "crypto";
+import transporter from '../config/nodemailer.js';
+import otpGenerator from 'otp-generator'
+import Otp from '../models/otpModel.js'
+
+//Send OTP
+const sendOtp = async (req, res) => {
+  console.log('first')
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
+
+    const existingUser = await userModel.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "User already registered" });
+    }
+
+    const otp = otpGenerator.generate(6, { digits: true, upperCaseAlphabets: false, lowerCaseAlphabets: false, alphabets: false, upperCase: false, specialChars: false });
+
+    await Otp.deleteMany({ email });
+
+    const hashedOtp = await bcrypt.hash(otp, 10);
+    await new Otp({ email, otp: hashedOtp }).save();
+
+    // Send OTP email
+    const mailOptions = {
+      from: `MediQuick <${process.env.SENDER_EMAIL}>`,
+      to: email,
+      subject: "OTP Verification - MediQuick",
+      html: `
+        <h2>MediQuick Email Verification</h2>
+        <p>Your OTP for registration is: <b>${otp}</b></p>
+        <p>This OTP will expire in 10 minutes.</p>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent successfully",
+    });
+  } catch (error) {
+    console.error("Send OTP error:", error);
+    res.status(500).json({ success: false, message: "Failed to send OTP" });
+  }
+};
+
 
 // REGISTER USER
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, otp } = req.body;
 
-    // Input validation
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "All fields are required",
-      });
+    if (!name || !email || !password || !otp) {
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    if (!validator.isEmail(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please enter a valid email",
-      });
+    const otpRecord = await Otp.findOne({ email });
+    if (!otpRecord) {
+      return res.status(400).json({ success: false, message: "OTP not found or expired" });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters",
-      });
+    const isOtpValid = await bcrypt.compare(otp, otpRecord.otp);
+    if (!isOtpValid) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
     }
 
-    // Check if user already exists
-    const existingUser = await userModel.findOne({ email });
+    // OTP verified → delete OTP record
+    await Otp.deleteMany({ email });
 
-    if (existingUser) {
-      const message = existingUser.name === name
-        ? "User already registered"
-        : "Email already used. Please use a different email";
-      return res.status(409).json({
-        success: false,
-        message,
-      });
-    }
-
-    // Hash password
+    // Now register the user (use your same logic)
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Save new user
     const newUser = new userModel({ name, email, password: hashedPassword });
     const savedUser = await newUser.save();
 
@@ -64,13 +94,9 @@ const registerUser = async (req, res) => {
       message: "User registered successfully",
       token,
     });
-
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    console.error("OTP verify error:", error);
+    res.status(500).json({ success: false, message: "Registration failed" });
   }
 };
 
@@ -439,4 +465,4 @@ const verifyRazorpay = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay };
+export { registerUser, loginUser, getProfile, updateProfile, bookAppointment, listAppointment, cancelAppointment, paymentRazorpay, verifyRazorpay, sendOtp };
