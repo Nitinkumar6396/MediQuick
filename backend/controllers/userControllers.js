@@ -10,10 +10,11 @@ import crypto from "crypto";
 import transporter from '../config/nodemailer.js';
 import otpGenerator from 'otp-generator'
 import Otp from '../models/otpModel.js'
+import {Resend} from 'resend'
 
 //Send OTP
 const sendOtp = async (req, res) => {
-  console.log('first')
+
   try {
     const { email } = req.body;
 
@@ -35,7 +36,7 @@ const sendOtp = async (req, res) => {
 
     // Send OTP email
     const mailOptions = {
-      from: `MediQuick <${process.env.SENDER_EMAIL}>`,
+      from: "MediQuick <onboarding@resend.dev>",
       to: email,
       subject: "OTP Verification - MediQuick",
       html: `
@@ -45,7 +46,9 @@ const sendOtp = async (req, res) => {
       `,
     };
 
-    await transporter.sendMail(mailOptions);
+    const resend = new Resend(process.env.RESEND_API_KEY)
+
+    await resend.emails.send(mailOptions)
 
     return res.status(200).json({
       success: true,
