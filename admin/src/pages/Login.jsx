@@ -38,7 +38,7 @@ const Login = () => {
                     localStorage.setItem('dToken', data.token)
                     setDToken(data.token)
                     toast.success("Doctor logged in successfully")
-                    navigate('/doctor/dashboard')
+                    navigate('/doctor-dashboard')
                 } else {
                     toast.error(data.message)
                 }
